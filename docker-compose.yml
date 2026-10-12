@@ -1,0 +1,132 @@
+version: '3.8'
+
+services:
+  # =========================================================================
+  # Primary Database: PostgreSQL 16 Alpine
+  # =========================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: mfg_erp_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-erp_admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-erp_secret_pass_2026}
+      POSTGRES_DB: ${DB_NAME:-manufacturing_erp}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    command: >
+      postgres
+        -c shared_buffers=256MB
+        -c max_connections=150
+        -c work_mem=16MB
+        -c maintenance_work_mem=64MB
+        -c effective_cache_size=768MB
+        -c checkpoint_completion_target=0.9
+        -c wal_buffers=16MB
+        -c default_statistics_target=100
+        -c random_page_cost=1.1
+        -c log_min_duration_statement=250
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-erp_admin} -d ${DB_NAME:-manufacturing_erp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - erp_network
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # =========================================================================
+  # In-Memory Cache & Session Broker: Redis 7 Alpine
+  # =========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: mfg_erp_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+        --requirepass ${REDIS_PASSWORD:-redis_secure_pass_2026}
+        --appendonly yes
+        --appendfsync everysec
+        --maxmemory 512mb
+        --maxmemory-policy allkeys-lru
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_pass_2026}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - erp_network
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.2'
+          memory: 128M
+
+  # =========================================================================
+  # Optional Developer Tools (Run with: docker compose --profile tools up -d)
+  # =========================================================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: mfg_erp_pgadmin
+    restart: unless-stopped
+    profiles:
+      - tools
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@mfg-erp.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin_secret_2026}
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - erp_network
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: mfg_erp_redis_commander
+    restart: unless-stopped
+    profiles:
+      - tools
+    environment:
+      REDIS_HOSTS: local:redis:6379:0:${REDIS_PASSWORD:-redis_secure_pass_2026}
+    ports:
+      - "${REDIS_COMMANDER_PORT:-8081}:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - erp_network
+
+volumes:
+  postgres_data:
+    name: mfg_erp_postgres_data
+    driver: local
+  redis_data:
+    name: mfg_erp_redis_data
+    driver: local
+
+networks:
+  erp_network:
+    name: mfg_erp_network
+    driver: bridge

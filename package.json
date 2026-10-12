@@ -1,0 +1,14 @@
+{
+  "name": "manufacturing-erp",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "server:dev": "npm --workspace=server run start:dev",
+    "client:dev": "npm --workspace=client run dev",
+    "build": "npm --workspaces run build"
+  }
+}
